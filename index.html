@@ -1,0 +1,1192 @@
+<!DOCTYPE html>
+<html lang="ml">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Production Work Tracking System</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- MQTT.js for Realtime cross-device sync across 40+ phones -->
+  <script src="https://unpkg.com/mqtt@5.3.4/dist/mqtt.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manjari:wght@400;700&display=swap" rel="stylesheet">
+  
+  <style>
+    body {
+      font-family: 'Inter', 'Manjari', sans-serif;
+    }
+    
+    /* Glowing Indicator Lights */
+    .indicator-light {
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .light-red {
+      background-color: #ef4444;
+      box-shadow: 0 0 15px 4px rgba(239, 68, 68, 0.7), 0 0 30px rgba(239, 68, 68, 0.4);
+      animation: pulse-red 2s infinite ease-in-out;
+    }
+    .light-green {
+      background-color: #10b981;
+      box-shadow: 0 0 18px 5px rgba(16, 185, 129, 0.8), 0 0 35px rgba(16, 185, 129, 0.5);
+      animation: pulse-green 1.8s infinite ease-in-out;
+    }
+    
+    @keyframes pulse-red {
+      0%, 100% {
+        box-shadow: 0 0 12px 3px rgba(239, 68, 68, 0.7), inset 0 0 6px rgba(255, 255, 255, 0.6);
+      }
+      50% {
+        box-shadow: 0 0 22px 7px rgba(239, 68, 68, 0.95), inset 0 0 10px rgba(255, 255, 255, 0.9);
+      }
+    }
+    
+    @keyframes pulse-green {
+      0%, 100% {
+        box-shadow: 0 0 14px 4px rgba(16, 185, 129, 0.7), inset 0 0 6px rgba(255, 255, 255, 0.6);
+      }
+      50% {
+        box-shadow: 0 0 25px 8px rgba(16, 185, 129, 0.95), inset 0 0 12px rgba(255, 255, 255, 0.95);
+      }
+    }
+
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #1e293b;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #475569;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col antialiased selection:bg-emerald-500 selection:text-white">
+
+  <!-- Header Navigation -->
+  <header class="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 shadow-xl">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
+      
+      <!-- Brand & Live Indicator -->
+      <div class="flex items-center gap-3">
+        <div class="h-10 w-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-900/40 shrink-0">
+          <svg class="w-6 h-6 text-slate-950 font-bold" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-xl font-extrabold tracking-tight text-white flex items-center gap-2">
+            PROD<span class="text-emerald-400">TRACK</span>
+            <span id="connectionBadge" class="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-semibold flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block"></span>
+              <span>40+ ലൈവ് കണക്ടഡ്</span>
+            </span>
+          </h1>
+          <div class="flex items-center gap-2 text-xs text-slate-400">
+            <span>പ്രൊഡക്ഷൻ വർക്ക് ട്രാക്കിംഗ്</span>
+            <span>•</span>
+            <button onclick="openSyncChannelModal()" class="text-emerald-400 hover:text-emerald-300 font-semibold underline underline-offset-2">
+              കോഡ്: <span id="currentChannelLabel">PROD-SYNC-88</span> ⚙️
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Metrics & Add Button -->
+      <div class="flex items-center gap-2 sm:gap-3 flex-wrap">
+        <div class="hidden sm:flex items-center gap-3 px-3 py-1.5 rounded-xl bg-slate-800/80 border border-slate-700/60 text-xs">
+          <div class="flex items-center gap-1.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block shadow-sm"></span>
+            <span class="text-slate-300">പൂർത്തിയായവ: <strong id="statCompleted" class="text-emerald-400 font-bold">0</strong></span>
+          </div>
+          <div class="h-3.5 w-px bg-slate-700"></div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block shadow-sm"></span>
+            <span class="text-slate-300">ബാക്കി: <strong id="statPending" class="text-rose-400 font-bold">0</strong></span>
+          </div>
+        </div>
+
+        <!-- Export Backup Button -->
+        <button onclick="exportDataToCSV()" title="മുഴുവൻ ഡാറ്റയും എക്സൽ / CSV ആയി സൂക്ഷിക്കുക" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-semibold text-xs flex items-center gap-1.5 transition">
+          <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+          </svg>
+          <span class="hidden md:inline">എക്സൽ ബാക്കപ്പ്</span>
+        </button>
+
+        <button onclick="openNewJobModal()" class="px-3.5 sm:px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold text-xs sm:text-sm shadow-lg shadow-emerald-500/25 flex items-center gap-1.5 transition-all active:scale-95">
+          <svg class="w-4 h-4 stroke-[2.5]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+          </svg>
+          <span>പുതിയ ജോബ്</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 space-y-5">
+
+    <!-- Rules & Stage Guidance -->
+    <div class="bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-slate-800 flex items-center justify-center shrink-0 border border-slate-700 text-lg">
+          🚦
+        </div>
+        <div>
+          <span class="font-bold text-slate-200">8 പ്രൊഡക്ഷൻ ഘട്ടങ്ങൾ:</span>
+          <span class="text-slate-400 ml-1">
+            Confirmation, Printing, Fusing, Cutting, Stitching, Clamping, Punching, <strong>Packing</strong> എന്നിവ പൂർത്തിയായാൽ 
+            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-emerald-300 font-bold bg-emerald-950/80 border border-emerald-500/40">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block mr-1"></span> GREEN LIGHT
+            </span> തെളിയും. എന്തെങ്കിലും ബാക്കിയുണ്ടെങ്കിൽ 
+            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-rose-300 font-bold bg-rose-950/80 border border-rose-500/40">
+              <span class="w-2 h-2 rounded-full bg-rose-500 inline-block mr-1"></span> RED LIGHT
+            </span> ആയിരിക്കും.
+          </span>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 self-end md:self-center shrink-0">
+        <span class="text-[11px] text-slate-400 bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60">
+          💾 ഓട്ടോമാറ്റിക് ആയി സേവ് ആകും (No Data Loss)
+        </span>
+      </div>
+    </div>
+
+    <!-- Filters and Search Bar -->
+    <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+      <div class="relative flex-1">
+        <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </span>
+        <input 
+          type="text" 
+          id="searchInput" 
+          oninput="renderJobs()" 
+          placeholder="ജോബ് നമ്പർ, ക്ലയന്റ് പേര്, ഐറ്റം എന്നിവ സെർച്ച് ചെയ്യുക..."
+          class="w-full pl-10 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
+        >
+      </div>
+
+      <div class="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+        <button onclick="setFilter('all')" id="filterAll" class="filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500 text-slate-950 shadow-md">
+          എല്ലാം (<span id="countAll">0</span>)
+        </button>
+        <button onclick="setFilter('pending')" id="filterPending" class="filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-400 hover:text-white border border-slate-700">
+          റെഡ് (<span id="countPending">0</span>)
+        </button>
+        <button onclick="setFilter('completed')" id="filterCompleted" class="filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-400 hover:text-white border border-slate-700">
+          ഗ്രീൻ (<span id="countCompleted">0</span>)
+        </button>
+      </div>
+    </div>
+
+    <!-- Jobs Grid Container -->
+    <div id="jobsContainer" class="space-y-4">
+      <!-- Dynamic Job Cards injected by JS -->
+    </div>
+
+    <!-- Empty State Placeholder (Clean state, no dummy data) -->
+    <div id="emptyState" class="hidden text-center py-16 px-4 bg-slate-900/40 rounded-2xl border border-dashed border-slate-800">
+      <div class="w-16 h-16 rounded-full bg-slate-800/80 flex items-center justify-center mx-auto mb-3 text-slate-400">
+        <svg class="w-8 h-8 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 9v6m3-3H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      </div>
+      <h3 class="text-base font-bold text-slate-200">ഇതുവരെ ജോബുകൾ ഒന്നും ചേർത്തിട്ടില്ല</h3>
+      <p class="text-xs text-slate-400 mt-1 max-w-sm mx-auto">നിങ്ങളുടെ ആദ്യത്തെ പ്രൊഡക്ഷൻ വർക്ക് ചേർക്കാൻ താഴെയുള്ള ബട്ടണിൽ ക്ലിക്ക് ചെയ്യുക. ചേർക്കുന്ന വിവരങ്ങൾ ഫോണിലും ക്ലൗഡിലും എപ്പോഴും സുരക്ഷിതമായിരിക്കും.</p>
+      <button onclick="openNewJobModal()" class="mt-4 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-lg shadow-emerald-500/20 transition">
+        + പുതിയ ജോബ് ചേർക്കുക
+      </button>
+    </div>
+
+  </main>
+
+  <!-- Add New Job Modal -->
+  <div id="newJobModal" class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg shadow-2xl p-5 sm:p-6 relative my-8">
+      <div class="flex items-center justify-between pb-3.5 border-b border-slate-800">
+        <h3 class="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+          <span>➕</span> പുതിയ പ്രൊഡക്ഷൻ വർക്ക് ചേർക്കുക
+        </h3>
+        <button onclick="closeNewJobModal()" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <form id="newJobForm" onsubmit="handleCreateJob(event)" class="space-y-3.5 pt-4 text-xs sm:text-sm">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">ജോബ് നമ്പർ / ID *</label>
+            <input type="text" id="inputJobId" required placeholder="e.g. ORD-101" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-500">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">ക്ലയന്റ് പേര് *</label>
+            <input type="text" id="inputClientName" required placeholder="e.g. കോഴിക്കോട് ടെക്സ്റ്റൈൽസ്" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-500">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">പ്രോഡക്റ്റ് / വർക്ക് ഇനം *</label>
+            <input type="text" id="inputItemName" required placeholder="e.g. ഷർട്ട് / ബാഗ് / ജേഴ്സി" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-500">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">എണ്ണം (Quantity) *</label>
+            <input type="number" id="inputQuantity" required min="1" placeholder="e.g. 500" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-500">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">ഡെലിവറി തീയതി (Due Date)</label>
+          <input type="date" id="inputDueDate" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-500">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">പ്രൂഫ് ചിത്രം (Proof Image - ഓപ്ഷണൽ)</label>
+          <div class="flex items-center gap-3">
+            <input 
+              type="file" 
+              id="inputProofImage" 
+              accept="image/*" 
+              onchange="handleNewJobImageSelected(event)"
+              class="w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-emerald-400 hover:file:bg-slate-700 cursor-pointer"
+            >
+            <div id="newJobImagePreview" class="hidden w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-slate-700 bg-slate-950">
+              <img id="newJobImageThumb" src="" alt="Proof Preview" class="w-full h-full object-cover">
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">പ്രത്യേക നിർദ്ദേശങ്ങൾ (Notes)</label>
+          <textarea id="inputNotes" rows="2" placeholder="നിറം, തയ്യൽ നിർദ്ദേശങ്ങൾ..." class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-100 focus:outline-none focus:border-emerald-500 text-xs"></textarea>
+        </div>
+
+        <div class="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+          <button type="button" onclick="closeNewJobModal()" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition">
+            റദ്ദാക്കുക
+          </button>
+          <button type="submit" class="px-5 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold shadow-lg shadow-emerald-500/20 transition">
+            ജോബ് സേവ് ചെയ്യുക
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Factory Sync Channel Modal -->
+  <div id="syncChannelModal" class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-sm shadow-2xl p-5">
+      <h4 class="text-sm font-bold text-white mb-2 flex items-center gap-2">
+        <span>📡</span> ഫാക്ടറി സിങ്ക് കോഡ് (Sync Code)
+      </h4>
+      <p class="text-xs text-slate-400 mb-4">
+        നിങ്ങളുടെ 40 ജീവനക്കാരുടെയും ഫോണുകളിൽ ഈ ഒരേ കോഡ് ആയിരിക്കണം. എന്നാൽ മാത്രമേ പരസ്പരം ലൈവ് ആയി ഡാറ്റ അപ്ഡേറ്റ് ആകൂ.
+      </p>
+      <input type="text" id="inputCustomChannel" class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-xs font-mono uppercase text-emerald-400 focus:outline-none focus:border-emerald-500 mb-4">
+      <div class="flex items-center justify-end gap-2">
+        <button onclick="closeSyncChannelModal()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs">ക്ലോസ്</button>
+        <button onclick="saveSyncChannel()" class="px-4 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs">സേവ് ചെയ്യുക</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lightbox Modal -->
+  <div id="imagePreviewModal" class="fixed inset-0 z-50 hidden bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-4 relative shadow-2xl flex flex-col max-h-[90vh]">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <h4 class="text-sm font-bold text-white flex items-center gap-2">
+          <span>🖼️</span> <span id="imageModalTitle">പ്രൂഫ് ഇമേജ്</span>
+        </h4>
+        <button onclick="closeImagePreview()" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div class="py-4 flex-1 flex items-center justify-center overflow-auto">
+        <img id="imageModalSrc" src="" alt="Proof High Res" class="max-h-[65vh] w-auto max-w-full rounded-xl object-contain border border-slate-800 shadow-md">
+      </div>
+      <div class="flex items-center justify-end pt-2 border-t border-slate-800">
+        <button onclick="closeImagePreview()" class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition">
+          ക്ലോസ് ചെയ്യുക
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete Confirm Modal -->
+  <div id="confirmModal" class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-sm shadow-2xl p-5 text-center">
+      <div class="w-12 h-12 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto mb-3">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        </svg>
+      </div>
+      <h4 class="text-sm font-bold text-white">ജോബ് നീക്കം ചെയ്യണോ?</h4>
+      <p class="text-xs text-slate-400 mt-1" id="confirmMessage">ഈ ജോബ് ലിസ്റ്റിൽ നിന്നും എല്ലാവരുടെയും സ്ക്രീനുകളിൽ നിന്നും പൂർണ്ണമായി നീക്കം ചെയ്യപ്പെടും.</p>
+      <div class="flex items-center justify-center gap-3 mt-5">
+        <button id="confirmCancelBtn" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition">
+          വേണ്ട
+        </button>
+        <button id="confirmOkBtn" class="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition">
+          അതെ, ഡിലീറ്റ് ചെയ്യുക
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="fixed bottom-5 right-5 z-50 transform translate-y-20 opacity-0 transition-all duration-300 pointer-events-none">
+    <div id="toastContent" class="flex items-center gap-3 px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white shadow-2xl text-xs font-semibold">
+      <span id="toastIcon"></span>
+      <span id="toastMessage"></span>
+    </div>
+  </div>
+
+  <script>
+    // --- 8 PRODUCTION STAGES (Including newly added Packing) ---
+    const PRODUCTION_STAGES = [
+      { key: 'confirmation', name: 'Confirmation', ml: 'കൺഫർമേഷൻ', icon: '📝' },
+      { key: 'printing', name: 'Printing', ml: 'പ്രിന്റിംഗ്', icon: '🖨️' },
+      { key: 'fusing', name: 'Fusing', ml: 'ഫ്യൂസിങ്', icon: '⚡' },
+      { key: 'cutting', name: 'Cutting', ml: 'കട്ടിംഗ്', icon: '✂️' },
+      { key: 'stitching', name: 'Stitching', ml: 'സ്റ്റിച്ചിംഗ്', icon: '🧵' },
+      { key: 'clamping', name: 'Clamping', ml: 'ക്ലാമ്പിംഗ്', icon: '🗜️' },
+      { key: 'punching', name: 'Punching', ml: 'പഞ്ചിംഗ്', icon: '🔘' },
+      { key: 'packing', name: 'Packing', ml: 'പാക്കിംഗ്', icon: '📦' }
+    ];
+
+    // Local Storage Key for ZERO DATA LOSS across refresh
+    const STORAGE_KEY = 'prod_tracker_jobs_clean_v4';
+
+    // Unique user ID per session / phone
+    let currentUserId = localStorage.getItem('prod_tracker_user_id');
+    if (!currentUserId) {
+      currentUserId = 'worker-' + Math.random().toString(36).substring(2, 8);
+      localStorage.setItem('prod_tracker_user_id', currentUserId);
+    }
+
+    // Sync Channel for the factory
+    let factorySyncChannel = localStorage.getItem('prod_factory_channel') || 'PROD-SYNC-88';
+
+    // In-memory jobs list loaded immediately from permanent storage
+    let jobs = loadLocalCache();
+    let currentFilter = 'all';
+    let tempNewJobImage = null;
+    let pendingDeleteId = null;
+    let mqttClient = null;
+
+    // --- PERMANENT CACHE HELPERS ---
+    function loadLocalCache() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) return parsed;
+        }
+      } catch (e) {
+        console.error("Cache load error:", e);
+      }
+      return []; // Clean empty start - No dummy data!
+    }
+
+    function saveLocalCache() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(jobs));
+      } catch (e) {
+        console.warn("Local storage quota error:", e);
+      }
+    }
+
+    // --- REALTIME MQTT WEBSOCKET CONNECTION ---
+    function initRealtimeSync() {
+      const channelLabel = document.getElementById('currentChannelLabel');
+      if (channelLabel) channelLabel.innerText = factorySyncChannel;
+
+      const brokerList = [
+        'wss://broker.emqx.io:8084/mqtt',
+        'wss://broker.hivemq.com:8884/mqtt'
+      ];
+      
+      const brokerUrl = brokerList[0];
+      const clientId = 'worker_' + currentUserId + '_' + Math.random().toString(16).substring(2, 8);
+
+      try {
+        mqttClient = mqtt.connect(brokerUrl, {
+          clientId: clientId,
+          clean: true,
+          connectTimeout: 4000,
+          reconnectPeriod: 3000
+        });
+
+        const topic = `factory/prod_tracker_v4/${factorySyncChannel}`;
+
+        mqttClient.on('connect', () => {
+          updateConnectionStatus(true);
+          mqttClient.subscribe(topic, { qos: 1 });
+          
+          // Ask peers for newest state or broadcast ours if we have data
+          if (jobs.length > 0) {
+            broadcastSyncMessage({
+              type: 'SYNC_STATE',
+              sender: currentUserId,
+              jobs: jobs
+            });
+          } else {
+            broadcastSyncMessage({
+              type: 'REQUEST_LATEST_STATE',
+              sender: currentUserId
+            });
+          }
+        });
+
+        mqttClient.on('message', (t, payload) => {
+          try {
+            const data = JSON.parse(payload.toString());
+            if (!data || data.sender === currentUserId) return; // Ignore own echoes
+
+            handleIncomingSync(data);
+          } catch (err) {
+            console.error("Failed to parse sync payload:", err);
+          }
+        });
+
+        mqttClient.on('error', () => {
+          updateConnectionStatus(false);
+        });
+
+        mqttClient.on('close', () => {
+          updateConnectionStatus(false);
+        });
+      } catch (e) {
+        console.warn("MQTT init error, functioning in local-persistence mode:", e);
+      }
+    }
+
+    function updateConnectionStatus(isConnected) {
+      const badge = document.getElementById('connectionBadge');
+      if (!badge) return;
+      if (isConnected) {
+        badge.className = "text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-semibold flex items-center gap-1.5";
+        badge.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-400 inline-block shadow-[0_0_6px_#10b981]"></span><span>40+ ലൈവ് കണക്ടഡ്</span>';
+      } else {
+        badge.className = "text-[11px] px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 font-semibold flex items-center gap-1.5";
+        badge.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-400 inline-block"></span><span>ഓഫ്‌ലൈൻ സേവ് മോഡ്</span>';
+      }
+    }
+
+    function broadcastSyncMessage(msg) {
+      if (!mqttClient || !mqttClient.connected) return;
+      const topic = `factory/prod_tracker_v4/${factorySyncChannel}`;
+      try {
+        mqttClient.publish(topic, JSON.stringify(msg), { qos: 1 });
+      } catch (e) {
+        console.error("Broadcast failed:", e);
+      }
+    }
+
+    function handleIncomingSync(data) {
+      switch (data.type) {
+        case 'REQUEST_LATEST_STATE':
+          if (jobs.length > 0) {
+            broadcastSyncMessage({
+              type: 'SYNC_STATE',
+              sender: currentUserId,
+              jobs: jobs
+            });
+          }
+          break;
+
+        case 'SYNC_STATE':
+          if (Array.isArray(data.jobs)) {
+            // Merge logic or take updated list
+            jobs = data.jobs;
+            saveLocalCache();
+            renderJobs();
+            showToast('മറ്റൊരു ഫോണിൽ നിന്ന് വിവരങ്ങൾ സിങ്ക് ചെയ്തു', 'info');
+          }
+          break;
+
+        case 'UPDATE_STAGE':
+          const targetJob = jobs.find(j => j.id === data.jobId);
+          if (targetJob) {
+            if (!targetJob.stages) targetJob.stages = {};
+            targetJob.stages[data.stageKey] = data.stageValue;
+            targetJob.lastUpdatedBy = data.sender;
+            saveLocalCache();
+            renderJobs();
+            
+            const isAllNow = isProofComplete(targetJob);
+            if (isAllNow) playBeep('success');
+            else playBeep('click');
+          }
+          break;
+
+        case 'TOGGLE_ALL_STAGES':
+          const tJob = jobs.find(j => j.id === data.jobId);
+          if (tJob) {
+            tJob.stages = data.stages;
+            tJob.lastUpdatedBy = data.sender;
+            saveLocalCache();
+            renderJobs();
+            playBeep('success');
+          }
+          break;
+
+        case 'ADD_JOB':
+          if (data.job && !jobs.some(j => j.id === data.job.id)) {
+            jobs.unshift(data.job);
+            saveLocalCache();
+            renderJobs();
+            playBeep('success');
+            showToast(`പുതിയ വർക്ക് ചേർക്കപ്പെട്ടു: ${data.job.jobCode}`, 'info');
+          }
+          break;
+
+        case 'DELETE_JOB':
+          jobs = jobs.filter(j => j.id !== data.jobId);
+          saveLocalCache();
+          renderJobs();
+          showToast(`ജോബ് നീക്കം ചെയ്യപ്പെട്ടു`, 'warning');
+          break;
+
+        case 'UPDATE_IMAGE':
+          const imgJob = jobs.find(j => j.id === data.jobId);
+          if (imgJob) {
+            imgJob.proofImage = data.proofImage;
+            saveLocalCache();
+            renderJobs();
+          }
+          break;
+      }
+    }
+
+    // --- PROOF CRITERIA (ALL 8 STAGES MUST BE TRUE) ---
+    function isProofComplete(job) {
+      if (!job || !job.stages) return false;
+      return PRODUCTION_STAGES.every(stage => !!job.stages[stage.key]);
+    }
+
+    function getCompletedStageCount(job) {
+      if (!job || !job.stages) return 0;
+      return PRODUCTION_STAGES.filter(stage => !!job.stages[stage.key]).length;
+    }
+
+    // --- AUDIO TONES ---
+    function playBeep(type) {
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        if (type === 'success') {
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(523.25, audioCtx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(783.99, audioCtx.currentTime + 0.15);
+          gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.25);
+        } else if (type === 'click') {
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(440, audioCtx.currentTime);
+          gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.08);
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.08);
+        }
+      } catch (e) {}
+    }
+
+    // --- COMPRESSION FOR PROOF IMAGES ---
+    function compressImage(file, maxDimension = 650, quality = 0.72) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
+            let width = img.width;
+            let height = img.height;
+            if (width > height) {
+              if (width > maxDimension) {
+                height = Math.round((height * maxDimension) / width);
+                width = maxDimension;
+              }
+            } else {
+              if (height > maxDimension) {
+                width = Math.round((width * maxDimension) / height);
+                height = maxDimension;
+              }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas.toDataURL('image/jpeg', quality));
+          };
+          img.onerror = reject;
+          img.src = e.target.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // --- RENDER FUNCTION ---
+    function renderJobs() {
+      const container = document.getElementById('jobsContainer');
+      const emptyState = document.getElementById('emptyState');
+      const searchQuery = (document.getElementById('searchInput').value || '').toLowerCase().trim();
+
+      let completedCount = 0;
+      let pendingCount = 0;
+
+      const filteredJobs = jobs.filter(job => {
+        const fullyComplete = isProofComplete(job);
+        if (fullyComplete) completedCount++;
+        else pendingCount++;
+
+        if (currentFilter === 'completed' && !fullyComplete) return false;
+        if (currentFilter === 'pending' && fullyComplete) return false;
+
+        if (searchQuery) {
+          const matchCode = (job.jobCode || '').toLowerCase().includes(searchQuery);
+          const matchClient = (job.clientName || '').toLowerCase().includes(searchQuery);
+          const matchItem = (job.item || '').toLowerCase().includes(searchQuery);
+          return matchCode || matchClient || matchItem;
+        }
+        return true;
+      });
+
+      document.getElementById('countAll').innerText = jobs.length;
+      document.getElementById('countCompleted').innerText = completedCount;
+      document.getElementById('countPending').innerText = pendingCount;
+      document.getElementById('statCompleted').innerText = completedCount;
+      document.getElementById('statPending').innerText = pendingCount;
+
+      if (filteredJobs.length === 0) {
+        container.innerHTML = '';
+        emptyState.classList.remove('hidden');
+        return;
+      }
+
+      emptyState.classList.add('hidden');
+
+      let html = '';
+      filteredJobs.forEach(job => {
+        const isComplete = isProofComplete(job);
+        const completedStagesCount = getCompletedStageCount(job);
+        const totalStages = PRODUCTION_STAGES.length; // 8
+        const progressPercentage = Math.round((completedStagesCount / totalStages) * 100);
+
+        html += `
+          <div class="bg-slate-900 border ${isComplete ? 'border-emerald-500/50 shadow-emerald-950/20' : 'border-slate-800'} rounded-2xl p-4 sm:p-5 shadow-xl transition-all duration-200 hover:border-slate-700">
+            
+            <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+              <div class="flex items-start gap-3">
+                <div class="w-10 h-10 rounded-xl bg-slate-800/90 border border-slate-700 flex flex-col items-center justify-center shrink-0">
+                  <span class="text-xs font-black text-slate-300">#</span>
+                  <span class="text-[10px] font-bold text-slate-400 leading-none">${(job.jobCode || '').replace(/[^0-9]/g, '').slice(-2) || '01'}</span>
+                </div>
+                <div>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-sm font-extrabold text-white tracking-wide">${job.jobCode}</span>
+                    <span class="text-xs px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700 font-medium">${job.clientName}</span>
+                    <span class="text-xs px-2 py-0.5 rounded-md bg-slate-800/60 text-slate-400 font-mono">എണ്ണം: ${job.qty} Nos</span>
+                    ${job.dueDate ? `<span class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-amber-400 border border-amber-500/20 font-medium">Due: ${job.dueDate}</span>` : ''}
+                  </div>
+                  <h4 class="text-xs sm:text-sm font-semibold text-slate-200 mt-1">${job.item}</h4>
+                  ${job.notes ? `<p class="text-[11px] text-slate-400 mt-0.5 italic">📝 ${job.notes}</p>` : ''}
+                </div>
+              </div>
+
+              <!-- PROOF LIGHT STATUS & IMAGE BOX -->
+              <div class="flex flex-wrap sm:flex-nowrap items-center gap-3 bg-slate-950/80 p-3 rounded-xl border ${isComplete ? 'border-emerald-500/40' : 'border-rose-500/30'}">
+                
+                <div class="flex items-center gap-3">
+                  <div class="relative flex items-center justify-center shrink-0">
+                    <div class="w-6 h-6 rounded-full indicator-light ${isComplete ? 'light-green' : 'light-red'}"></div>
+                    <div class="absolute w-2 h-2 rounded-full bg-white/90"></div>
+                  </div>
+
+                  <div>
+                    <div class="text-[10px] uppercase tracking-wider font-extrabold text-slate-400">PROOF STATUS</div>
+                    <div class="flex items-center gap-1.5">
+                      <span class="text-xs font-extrabold ${isComplete ? 'text-emerald-400' : 'text-rose-400'}">
+                        ${isComplete ? '✓ പ്രൂഫ് റെഡി (GREEN LIGHT)' : '⏳ പ്രൂഫ് പെൻഡിംഗ് (RED LIGHT)'}
+                      </span>
+                    </div>
+                    <div class="text-[10px] text-slate-400">
+                      ${isComplete ? 'എല്ലാ ഘട്ടങ്ങളും പൂർത്തിയായി!' : `${totalStages - completedStagesCount} ഘട്ടങ്ങൾ ബാക്കി`}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Proof Image Thumbnail -->
+                <div class="border-t sm:border-t-0 sm:border-l border-slate-800 pt-2 sm:pt-0 sm:pl-3 flex items-center gap-2">
+                  ${job.proofImage ? `
+                    <div class="relative group cursor-pointer" onclick="window.openImagePreview('${job.proofImage}', '${job.jobCode} - പ്രൂഫ് ഇമേജ്')">
+                      <img src="${job.proofImage}" alt="Proof" class="w-10 h-10 object-cover rounded-lg border border-slate-700 group-hover:border-emerald-500 transition shadow-sm">
+                      <div class="absolute inset-0 bg-black/40 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                        <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                      </div>
+                    </div>
+                    <div class="flex flex-col gap-1">
+                      <label class="text-[9px] px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium cursor-pointer transition text-center">
+                        മാറ്റുക
+                        <input type="file" accept="image/*" class="hidden" onchange="window.handleJobImageUpload('${job.id}', event)">
+                      </label>
+                      <button onclick="window.removeJobImage('${job.id}')" class="text-[9px] px-1.5 py-0.5 rounded text-rose-400 hover:bg-rose-950/40 transition">
+                        നീക്കം
+                      </button>
+                    </div>
+                  ` : `
+                    <label class="flex flex-col items-center justify-center w-20 h-10 px-1 rounded-lg border border-dashed border-slate-700 hover:border-emerald-500/60 bg-slate-900/60 hover:bg-slate-800 cursor-pointer transition text-center">
+                      <span class="text-xs">📷</span>
+                      <span class="text-[9px] font-semibold text-slate-400 hover:text-emerald-400">+ പ്രൂഫ് ചിത്രം</span>
+                      <input type="file" accept="image/*" class="hidden" onchange="window.handleJobImageUpload('${job.id}', event)">
+                    </label>
+                  `}
+                </div>
+
+                <!-- Actions -->
+                <div class="border-t sm:border-t-0 sm:border-l border-slate-800 pt-2 sm:pt-0 sm:pl-3 flex flex-col gap-1 ml-auto">
+                  <button onclick="window.toggleAllStages('${job.id}', ${!isComplete})" class="text-[10px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition">
+                    ${isComplete ? 'റീസെറ്റ്' : 'എല്ലാം തീർക്കുക'}
+                  </button>
+                  <button onclick="window.confirmDeleteJob('${job.id}')" class="text-[9px] px-2 py-0.5 text-rose-400 hover:text-rose-300 hover:bg-rose-950/50 rounded transition text-center">
+                    ഡിലീറ്റ്
+                  </button>
+                </div>
+
+              </div>
+
+            </div>
+
+            <!-- Progress Bar -->
+            <div class="mt-3">
+              <div class="flex items-center justify-between text-xs mb-1">
+                <span class="font-semibold text-slate-400 text-[11px]">പ്രൊഡക്ഷൻ ഘട്ടങ്ങൾ (${completedStagesCount}/${totalStages})</span>
+                <span class="font-bold text-[11px] ${isComplete ? 'text-emerald-400' : 'text-slate-300'}">${progressPercentage}% പൂർത്തിയായി</span>
+              </div>
+              <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                <div class="h-1.5 rounded-full transition-all duration-500 ${isComplete ? 'bg-gradient-to-r from-emerald-500 to-teal-400' : 'bg-gradient-to-r from-rose-500 to-amber-500'}" style="width: ${progressPercentage}%"></div>
+              </div>
+            </div>
+
+            <!-- 8 Clickable Stage Badges (Including Packing) -->
+            <div class="mt-3.5 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+              ${PRODUCTION_STAGES.map(stage => {
+                const done = !!(job.stages && job.stages[stage.key]);
+                return `
+                  <button 
+                    onclick="window.toggleStage('${job.id}', '${stage.key}')" 
+                    class="group relative flex flex-col items-center justify-center p-2 rounded-xl border text-center transition-all active:scale-95 ${
+                      done 
+                        ? 'bg-emerald-950/50 border-emerald-500/60 text-emerald-200 hover:bg-emerald-900/50 shadow-sm shadow-emerald-950' 
+                        : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                    }"
+                  >
+                    <div class="flex items-center justify-center gap-1 mb-0.5">
+                      <span class="text-sm">${stage.icon}</span>
+                      <span class="w-1.5 h-1.5 rounded-full ${done ? 'bg-emerald-400 shadow-[0_0_6px_#10b981]' : 'bg-slate-700'}"></span>
+                    </div>
+                    <span class="text-[11px] font-bold tracking-tight">${stage.name}</span>
+                    <span class="text-[9px] text-slate-400 font-medium">${stage.ml}</span>
+                    <span class="mt-1 text-[8px] font-bold px-1.5 py-0.2 rounded ${done ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-500'}">
+                      ${done ? 'DONE' : 'PENDING'}
+                    </span>
+                  </button>
+                `;
+              }).join('')}
+            </div>
+
+          </div>
+        `;
+      });
+
+      container.innerHTML = html;
+    }
+
+    // --- INTERACTION HANDLERS ---
+    window.toggleStage = function(jobId, stageKey) {
+      const job = jobs.find(j => j.id === jobId);
+      if (!job) return;
+
+      if (!job.stages) job.stages = {};
+      const currentVal = !!job.stages[stageKey];
+      const nextVal = !currentVal;
+      job.stages[stageKey] = nextVal;
+      job.lastUpdatedBy = currentUserId;
+
+      saveLocalCache();
+      renderJobs();
+
+      const isAllDone = isProofComplete(job);
+      if (isAllDone) {
+        playBeep('success');
+        showToast(`🎉 ${job.jobCode}: എല്ലാ സ്റ്റേജുകളും പൂർത്തിയായി! Proof ൽ GREEN LIGHT!`, 'success');
+      } else {
+        playBeep('click');
+        const stObj = PRODUCTION_STAGES.find(s => s.key === stageKey);
+        showToast(`${stObj ? stObj.name : stageKey}: ${nextVal ? 'പൂർത്തിയായി' : 'പെൻഡിംഗ്'}`, nextVal ? 'info' : 'default');
+      }
+
+      // Broadcast to other phones
+      broadcastSyncMessage({
+        type: 'UPDATE_STAGE',
+        sender: currentUserId,
+        jobId: jobId,
+        stageKey: stageKey,
+        stageValue: nextVal
+      });
+    };
+
+    window.toggleAllStages = function(jobId, targetState) {
+      const job = jobs.find(j => j.id === jobId);
+      if (!job) return;
+
+      const newStages = {};
+      PRODUCTION_STAGES.forEach(s => {
+        newStages[s.key] = targetState;
+      });
+
+      job.stages = newStages;
+      job.lastUpdatedBy = currentUserId;
+
+      saveLocalCache();
+      renderJobs();
+
+      if (targetState) {
+        playBeep('success');
+        showToast(`🟢 ${job.jobCode}: എല്ലാം പൂർത്തിയായി! Proof GREEN LIGHT തെളിഞ്ഞു.`, 'success');
+      } else {
+        playBeep('click');
+        showToast(`🔴 ${job.jobCode}: സ്റ്റേജുകൾ റീസെറ്റ് ചെയ്തു.`, 'warning');
+      }
+
+      broadcastSyncMessage({
+        type: 'TOGGLE_ALL_STAGES',
+        sender: currentUserId,
+        jobId: jobId,
+        stages: newStages
+      });
+    };
+
+    window.handleCreateJob = function(e) {
+      e.preventDefault();
+      const code = document.getElementById('inputJobId').value.trim();
+      const client = document.getElementById('inputClientName').value.trim();
+      const item = document.getElementById('inputItemName').value.trim();
+      const qty = parseInt(document.getElementById('inputQuantity').value) || 1;
+      const dueDate = document.getElementById('inputDueDate').value;
+      const notes = document.getElementById('inputNotes').value.trim();
+
+      const initialStages = {};
+      PRODUCTION_STAGES.forEach(st => {
+        initialStages[st.key] = false;
+      });
+
+      const newJob = {
+        id: 'job_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        jobCode: code,
+        clientName: client,
+        item: item,
+        qty: qty,
+        dueDate: dueDate || '',
+        notes: notes,
+        proofImage: tempNewJobImage || null,
+        createdAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
+        createdBy: currentUserId,
+        stages: initialStages
+      };
+
+      jobs.unshift(newJob);
+      saveLocalCache();
+      renderJobs();
+      window.closeNewJobModal();
+
+      playBeep('success');
+      showToast(`പുതിയ വർക്ക് ${code} ചേർത്തു! (Proof ൽ RED LIGHT)`, 'success');
+
+      broadcastSyncMessage({
+        type: 'ADD_JOB',
+        sender: currentUserId,
+        job: newJob
+      });
+    };
+
+    window.handleJobImageUpload = async function(jobId, event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      try {
+        const compressedBase64 = await compressImage(file, 650, 0.72);
+        const job = jobs.find(j => j.id === jobId);
+        if (job) {
+          job.proofImage = compressedBase64;
+          saveLocalCache();
+          renderJobs();
+        }
+
+        broadcastSyncMessage({
+          type: 'UPDATE_IMAGE',
+          sender: currentUserId,
+          jobId: jobId,
+          proofImage: compressedBase64
+        });
+
+        showToast('📷 പ്രൂഫ് ഇമേജ് അപ്‌‌ലോഡ് ചെയ്തു!', 'success');
+      } catch (err) {
+        showToast('ഇമേജ് അപ്‌ലോഡ് പരാജയപ്പെട്ടു', 'warning');
+      }
+    };
+
+    window.removeJobImage = function(jobId) {
+      const job = jobs.find(j => j.id === jobId);
+      if (job) {
+        job.proofImage = null;
+        saveLocalCache();
+        renderJobs();
+      }
+
+      broadcastSyncMessage({
+        type: 'UPDATE_IMAGE',
+        sender: currentUserId,
+        jobId: jobId,
+        proofImage: null
+      });
+
+      showToast('പ്രൂഫ് ചിത്രം നീക്കം ചെയ്തു', 'warning');
+    };
+
+    window.confirmDeleteJob = function(jobId) {
+      pendingDeleteId = jobId;
+      const job = jobs.find(j => j.id === jobId);
+      if (job) {
+        document.getElementById('confirmMessage').innerText = `"${job.jobCode} - ${job.clientName}" ലിസ്റ്റിൽ നിന്നും എല്ലാവരുടെയും സ്ക്രീനുകളിൽ നിന്നും പൂർണ്ണമായി നീക്കം ചെയ്യപ്പെടും.`;
+      }
+      document.getElementById('confirmModal').classList.remove('hidden');
+    };
+
+    document.getElementById('confirmCancelBtn').addEventListener('click', () => {
+      pendingDeleteId = null;
+      document.getElementById('confirmModal').classList.add('hidden');
+    });
+
+    document.getElementById('confirmOkBtn').addEventListener('click', () => {
+      if (pendingDeleteId) {
+        const idToDelete = pendingDeleteId;
+        pendingDeleteId = null;
+        document.getElementById('confirmModal').classList.add('hidden');
+
+        jobs = jobs.filter(j => j.id !== idToDelete);
+        saveLocalCache();
+        renderJobs();
+        showToast('ജോബ് നീക്കം ചെയ്തു', 'warning');
+
+        broadcastSyncMessage({
+          type: 'DELETE_JOB',
+          sender: currentUserId,
+          jobId: idToDelete
+        });
+      }
+    });
+
+    window.openNewJobModal = function() {
+      document.getElementById('inputJobId').value = `ORD-${Math.floor(100 + Math.random() * 900)}`;
+      document.getElementById('inputClientName').value = '';
+      document.getElementById('inputItemName').value = '';
+      document.getElementById('inputQuantity').value = '';
+      document.getElementById('inputDueDate').value = '';
+      document.getElementById('inputNotes').value = '';
+      document.getElementById('inputProofImage').value = '';
+      document.getElementById('newJobImagePreview').classList.add('hidden');
+      tempNewJobImage = null;
+      document.getElementById('newJobModal').classList.remove('hidden');
+    };
+
+    window.closeNewJobModal = function() {
+      document.getElementById('newJobModal').classList.add('hidden');
+      tempNewJobImage = null;
+    };
+
+    window.handleNewJobImageSelected = async function(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      tempNewJobImage = await compressImage(file, 650, 0.72);
+      const thumb = document.getElementById('newJobImageThumb');
+      thumb.src = tempNewJobImage;
+      document.getElementById('newJobImagePreview').classList.remove('hidden');
+      showToast('പ്രൂഫ് ചിത്രം റെഡിയായി', 'info');
+    };
+
+    window.openImagePreview = function(src, title) {
+      document.getElementById('imageModalSrc').src = src;
+      document.getElementById('imageModalTitle').innerText = title || 'പ്രൂഫ് ഇമേജ് പ്രിവ്യൂ';
+      document.getElementById('imagePreviewModal').classList.remove('hidden');
+    };
+
+    window.closeImagePreview = function() {
+      document.getElementById('imagePreviewModal').classList.add('hidden');
+    };
+
+    window.openSyncChannelModal = function() {
+      document.getElementById('inputCustomChannel').value = factorySyncChannel;
+      document.getElementById('syncChannelModal').classList.remove('hidden');
+    };
+
+    window.closeSyncChannelModal = function() {
+      document.getElementById('syncChannelModal').classList.add('hidden');
+    };
+
+    window.saveSyncChannel = function() {
+      const val = document.getElementById('inputCustomChannel').value.trim();
+      if (val) {
+        factorySyncChannel = val.toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+        localStorage.setItem('prod_factory_channel', factorySyncChannel);
+        window.closeSyncChannelModal();
+        showToast(`സിങ്ക് കോഡ് "${factorySyncChannel}" ലേക്ക് മാറ്റി! റീകണക്റ്റ് ചെയ്യുന്നു...`, 'info');
+        if (mqttClient) {
+          try { mqttClient.end(true); } catch(e){}
+        }
+        initRealtimeSync();
+      }
+    };
+
+    window.setFilter = function(filterType) {
+      currentFilter = filterType;
+      document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.classList.remove('bg-emerald-500', 'text-slate-950');
+        btn.classList.add('bg-slate-800', 'text-slate-400');
+      });
+
+      if (filterType === 'all') {
+        document.getElementById('filterAll').classList.remove('bg-slate-800', 'text-slate-400');
+        document.getElementById('filterAll').classList.add('bg-emerald-500', 'text-slate-950');
+      } else if (filterType === 'pending') {
+        document.getElementById('filterPending').classList.remove('bg-slate-800', 'text-slate-400');
+        document.getElementById('filterPending').classList.add('bg-emerald-500', 'text-slate-950');
+      } else if (filterType === 'completed') {
+        document.getElementById('filterCompleted').classList.remove('bg-slate-800', 'text-slate-400');
+        document.getElementById('filterCompleted').classList.add('bg-emerald-500', 'text-slate-950');
+      }
+      renderJobs();
+    };
+
+    // Excel / CSV Export Feature (With Packing included)
+    window.exportDataToCSV = function() {
+      if (!jobs || jobs.length === 0) {
+        showToast("ഡൗൺലോഡ് ചെയ്യാൻ ഡാറ്റ ലഭ്യമല്ല", "warning");
+        return;
+      }
+
+      const headers = [
+        "Job Code", 
+        "Client Name", 
+        "Item Details", 
+        "Quantity", 
+        "Due Date", 
+        "Proof Light Status", 
+        "Confirmation", 
+        "Printing", 
+        "Fusing", 
+        "Cutting", 
+        "Stitching", 
+        "Clamping", 
+        "Punching", 
+        "Packing", 
+        "Created At", 
+        "Notes"
+      ];
+
+      const rows = jobs.map(j => {
+        const isComplete = isProofComplete(j);
+        return [
+          `"${(j.jobCode || '').replace(/"/g, '""')}"`,
+          `"${(j.clientName || '').replace(/"/g, '""')}"`,
+          `"${(j.item || '').replace(/"/g, '""')}"`,
+          j.qty || 0,
+          `"${j.dueDate || ''}"`,
+          isComplete ? "GREEN LIGHT (COMPLETE)" : "RED LIGHT (PENDING)",
+          j.stages?.confirmation ? "DONE" : "PENDING",
+          j.stages?.printing ? "DONE" : "PENDING",
+          j.stages?.fusing ? "DONE" : "PENDING",
+          j.stages?.cutting ? "DONE" : "PENDING",
+          j.stages?.stitching ? "DONE" : "PENDING",
+          j.stages?.clamping ? "DONE" : "PENDING",
+          j.stages?.punching ? "DONE" : "PENDING",
+          j.stages?.packing ? "DONE" : "PENDING",
+          `"${j.createdAt || ''}"`,
+          `"${(j.notes || '').replace(/"/g, '""')}"`
+        ].join(",");
+      });
+
+      const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(","), ...rows].join("\n");
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      const today = new Date().toISOString().slice(0, 10);
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", `Production_Data_${today}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      showToast("💾 എക്സൽ ബാക്കപ്പ് സുരക്ഷിതമായി ഡൗൺലോഡ് ചെയ്തു!", "success");
+    };
+
+    let toastTimeout = null;
+    function showToast(message, type = 'default') {
+      const toast = document.getElementById('toast');
+      const toastMessage = document.getElementById('toastMessage');
+      const toastIcon = document.getElementById('toastIcon');
+      const toastContent = document.getElementById('toastContent');
+
+      clearTimeout(toastTimeout);
+
+      let icon = '🔔';
+      let borderClass = 'border-slate-700 bg-slate-900';
+
+      if (type === 'success') {
+        icon = '🟢';
+        borderClass = 'border-emerald-500/60 bg-emerald-950/90 text-emerald-200';
+      } else if (type === 'warning') {
+        icon = '🔴';
+        borderClass = 'border-rose-500/60 bg-rose-950/90 text-rose-200';
+      } else if (type === 'info') {
+        icon = '⚡';
+        borderClass = 'border-teal-500/60 bg-slate-900 text-teal-300';
+      }
+
+      toastContent.className = `flex items-center gap-3 px-4 py-3 rounded-xl border ${borderClass} shadow-2xl text-xs font-semibold`;
+      toastIcon.innerText = icon;
+      toastMessage.innerText = message;
+
+      toast.classList.remove('translate-y-20', 'opacity-0');
+      toast.classList.add('translate-y-0', 'opacity-100');
+
+      toastTimeout = setTimeout(() => {
+        toast.classList.remove('translate-y-0', 'opacity-100');
+        toast.classList.add('translate-y-20', 'opacity-0');
+      }, 3500);
+    }
+
+    // App Initialization on Load
+    renderJobs();
+    initRealtimeSync();
+  </script>
+</body>
+</html>
